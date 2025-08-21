@@ -1,0 +1,26 @@
+[hewg]
+version = { 0 2 1 }
+type = "library"
+
+[project]
+version = { 0 0 0 }
+name = "datalogpp"
+description = ""
+authors = { }
+
+[libraries]
+native = { }
+
+[hooks.prebuild]
+[hooks.postbuild]
+
+[cxx]
+flags = { "-Wextra" "-Werror" }
+std = 23
+sources = { "datalogpp.cc" }
+
+[c]
+flags = { }
+std = 17
+sources = { }
+

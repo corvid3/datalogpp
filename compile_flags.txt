@@ -1,0 +1,6 @@
+-std=c++23
+-Iinclude
+-Iprivate
+-Wall
+-Wextra
+-Werror

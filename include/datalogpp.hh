@@ -1,0 +1,261 @@
+#pragma once
+
+#include <algorithm>
+#include <concepts>
+#include <functional>
+#include <initializer_list>
+#include <list>
+#include <map>
+#include <memory>
+#include <set>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <variant>
+#include <vector>
+
+namespace datalogpp {
+
+// TODO: embetter the ergonomics,
+// perhaps wrap all rule/fact modification within some
+// lambdas w/ accessor structs as parameters,
+// and then force infer of the engine at the end
+// of execution?
+
+class Interpreter;
+
+class Var
+{
+public:
+  explicit constexpr Var(std::string_view name)
+    : m_name(name) {};
+
+  constexpr operator std::string_view() const { return m_name; }
+
+  constexpr bool operator<(Var const& rhs) const
+  {
+    return std::hash<std::string_view>()(m_name) <
+           std::hash<std::string_view>()(rhs.m_name);
+  }
+
+private:
+  friend class Interpreter;
+
+  std::string m_name;
+};
+
+Var inline
+operator""_V(char const* in, std::size_t const)
+{
+  return Var(in);
+}
+
+using Value = std::string;
+using Term = std::variant<Var, Value>;
+using Fact = std::vector<Value>;
+
+class Atom
+{
+public:
+  Atom(std::string_view name, std::span<Term const> parameters)
+    : m_predicateName(name)
+    , m_subterms(parameters.begin(), parameters.end())
+  {
+    if (parameters.size() == 0)
+      throw std::runtime_error(
+        "erroring on 0 subterm atom.... not sure how they work.");
+  }
+
+  Atom(std::string_view name, std::initializer_list<Term const> params)
+    : Atom(name, std::span(params))
+  {
+  }
+
+  bool ground() const
+  {
+    for (auto const& term : m_subterms)
+      if (std::holds_alternative<Var>(term))
+        return false;
+
+    return true;
+  }
+
+  std::span<Term const> subterms() const { return m_subterms; }
+  std::string_view predicate() const { return m_predicateName; }
+
+private:
+  std::string m_predicateName;
+  std::vector<Term> m_subterms;
+};
+
+auto inline
+operator""_p(char const* in, unsigned long)
+{
+  return [=](auto&&... ps) { return Atom(in, { ps... }); };
+}
+
+struct Rule
+{
+  Atom head;
+  std::vector<Atom> body;
+
+  Rule(Atom head, std::span<Atom const> body)
+    : head(head)
+    , body(body.begin(), body.end()) {};
+
+  // fact
+  Rule(Atom head)
+    : head(head)
+  {
+  }
+
+  bool is_ground() const
+  {
+    bool ground = head.ground();
+
+    for (auto const& atom : body)
+      ground &= atom.ground();
+
+    return ground;
+  }
+};
+
+inline auto operator,(Atom const& lhs, Atom const& rhs)
+{
+  return std::make_tuple(lhs, rhs);
+}
+
+template<typename... Ts>
+inline auto operator,(std::tuple<Ts...> const& lhs, Atom const& rhs)
+{
+  return std::tuple_cat(lhs, std::make_tuple(rhs));
+}
+
+class Predicate
+{
+  template<typename... Ts>
+  auto static constexpr tuple_to_array_term(std::tuple<Ts...> what)
+  {
+    return std::apply([](auto&&... in) { return std::array{ Term(in)... }; },
+                      what);
+  }
+
+  template<typename... Ts>
+  auto static constexpr tuple_to_array(std::tuple<Ts...> what)
+  {
+    return std::apply([](auto&&... in) { return std::array{ in... }; }, what);
+  }
+
+  template<typename... Ts>
+  struct RuleAdder
+  {
+    struct fact_hack
+    {};
+
+    RuleAdder(Predicate& p, std::tuple<Ts...> const& terms)
+      : m_pred(p)
+    {
+      m_terms = tuple_to_array_term(terms);
+    }
+
+    void operator=(fact_hack)
+    {
+      std::array<Value, sizeof...(Ts)> vals;
+      std::ranges::transform(
+        *m_terms, vals.begin(), [](auto&& in) { return std::get<Value>(in); });
+
+      m_pred.add(vals);
+    }
+
+    void operator=(Atom const& atom) &&
+    {
+      m_pred.add(*m_terms, std::array{ atom });
+    }
+
+    void operator=(auto const& atoms) &&
+    {
+
+      m_pred.add(*m_terms, tuple_to_array(atoms));
+    }
+
+    Predicate& m_pred;
+    std::optional<std::array<Term, sizeof...(Ts)>> m_terms;
+  };
+
+public:
+  std::string_view name() const;
+  int arity() const;
+
+  void add(std::span<Value const> vals);
+  void add(std::span<Term const> terms, std::span<Atom const> atoms);
+
+  void add(std::initializer_list<Value const> vals) { add(std::span(vals)); }
+
+  void add(std::initializer_list<Term const> terms,
+           std::initializer_list<Atom const> atoms)
+  {
+    add(std::span(terms), std::span(atoms));
+  }
+
+  bool query_fact(std::span<Value const> vals);
+  bool query_fact(std::initializer_list<Value const> vals)
+  {
+    return query_fact(std::span(vals));
+  }
+
+  auto operator()(auto... terms)
+  {
+    if (sizeof...(terms) != m_arity)
+      throw std::runtime_error("arity of predicate is mismatched");
+
+    return RuleAdder(*this, std::tuple(terms...));
+  }
+
+private:
+  Predicate(std::string_view name, int arity);
+
+  std::string const m_name;
+  int const m_arity;
+
+  // staging for newly derived facts
+  // see the `infer` method
+  std::set<Fact> m_baseFacts;
+  std::set<Fact> m_derivedFacts;
+  std::set<Fact> m_newlyDerivedFacts;
+
+  std::list<Rule> m_rules;
+
+  friend class Interpreter;
+};
+
+class Interpreter
+{
+  using Substitution = std::map<Var, Value>;
+
+public:
+  Interpreter() = default;
+
+  Predicate& predicate(std::string_view name, int arity);
+
+  void infer();
+  std::vector<Substitution> query(std::span<Atom const>);
+
+  // creates a formatted string
+  // that dumps every fact in the database
+  std::string dump_facts();
+
+private:
+  std::vector<Substitution> evaluate(std::span<Atom const> atoms);
+  std::vector<Substitution> search(bool naive,
+                                   int i,
+                                   std::span<Atom const> atoms,
+                                   Substitution& subst);
+
+  bool unify(Atom atom, Fact fact, Substitution& subst);
+  std::map<std::string, Predicate, std::less<>> m_predicates;
+};
+
+};
