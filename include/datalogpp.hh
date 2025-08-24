@@ -7,10 +7,12 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -64,9 +66,6 @@ public:
     : m_predicateName(name)
     , m_subterms(parameters.begin(), parameters.end())
   {
-    if (parameters.size() == 0)
-      throw std::runtime_error(
-        "erroring on 0 subterm atom.... not sure how they work.");
   }
 
   Atom(std::string_view name, std::initializer_list<Term const> params)
@@ -161,6 +160,11 @@ class Predicate
       m_terms = tuple_to_array_term(terms);
     }
 
+    RuleAdder(Predicate& p)
+      : m_pred(p)
+    {
+    }
+
     void operator=(fact_hack)
     {
       std::array<Value, sizeof...(Ts)> vals;
@@ -206,6 +210,13 @@ public:
     return query_fact(std::span(vals));
   }
 
+  auto operator()()
+  {
+    if (m_arity != 0)
+      throw std::runtime_error("arity of predicate is mismatched");
+
+    return RuleAdder(*this);
+  };
   auto operator()(auto... terms)
   {
     if (sizeof...(terms) != m_arity)
@@ -231,6 +242,8 @@ private:
   friend class Interpreter;
 };
 
+using inequality_map = std::map<Var, Term>;
+
 class Interpreter
 {
   using Substitution = std::map<Var, Value>;
@@ -238,10 +251,16 @@ class Interpreter
 public:
   Interpreter() = default;
 
+  // parses syntax to create rules and definitions
+  void execute(std::string_view);
+
   Predicate& predicate(std::string_view name, int arity);
+  std::optional<std::reference_wrapper<Predicate>> get_predicate(
+    std::string_view what);
 
   void infer();
-  std::vector<Substitution> query(std::span<Atom const>);
+  std::vector<Substitution> query(std::span<Atom const>,
+                                  inequality_map const& inequality_assertions);
 
   // creates a formatted string
   // that dumps every fact in the database
@@ -252,9 +271,13 @@ private:
   std::vector<Substitution> search(bool naive,
                                    int i,
                                    std::span<Atom const> atoms,
+                                   inequality_map const& inequality_assertions,
                                    Substitution& subst);
 
-  bool unify(Atom atom, Fact fact, Substitution& subst);
+  bool unify(Atom atom,
+             Fact fact,
+             inequality_map const& inequality_assertions,
+             Substitution& subst);
   std::map<std::string, Predicate, std::less<>> m_predicates;
 };
 

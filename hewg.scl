@@ -1,15 +1,17 @@
 [hewg]
-version = { 0 2 1 }
+version = "0.2.1"
 type = "library"
 
 [project]
-version = { 0 0 0 }
+org = "crow"
+version = "0.0.1"
 name = "datalogpp"
 description = ""
 authors = { }
 
-[libraries]
-native = { }
+[depends]
+internal = { }
+external = { }
 
 [hooks.prebuild]
 [hooks.postbuild]
