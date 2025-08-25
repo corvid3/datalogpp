@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <iostream>
 #include <lexible.hh>
 #include <map>
 #include <optional>
@@ -45,13 +44,15 @@ Predicate::add(std::span<const Value> vals)
 }
 
 void
-Predicate::add(std::span<const Term> terms, std::span<const Atom> atoms)
+Predicate::add(std::span<const Term> terms,
+               std::span<const Atom> atoms,
+               inequality_map const& map)
 {
   if ((int)terms.size() != m_arity)
     throw std::runtime_error(
       "when adding rule to predicate, terms.size() != arity");
 
-  m_rules.push_back(Rule(Atom(m_name, terms), atoms));
+  m_rules.push_back(Rule(Atom(m_name, terms), atoms, map));
 }
 
 bool
@@ -105,7 +106,8 @@ Interpreter::infer()
       for (auto& rule : pred.m_rules) {
         // std::cout << std::format(
         //   "{}::{}\n", pred.name(), rule.head.predicate());
-        for (auto& subst : this->evaluate(rule.body)) {
+        for (auto& subst :
+             this->evaluate(rule.body, rule.inequality_assertions)) {
           Fact f;
 
           for (auto const& term : rule.head.subterms()) {
@@ -155,10 +157,12 @@ Interpreter::query(std::span<Atom const> atoms,
 }
 
 auto
-Interpreter::evaluate(std::span<Atom const> atoms) -> std::vector<Substitution>
+Interpreter::evaluate(std::span<Atom const> atoms,
+                      inequality_map const& inequality_assertions)
+  -> std::vector<Substitution>
 {
   Substitution in;
-  return search(false, 0, atoms, {}, in);
+  return search(false, 0, atoms, inequality_assertions, in);
 }
 
 auto

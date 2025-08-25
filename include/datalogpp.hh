@@ -58,6 +58,7 @@ operator""_V(char const* in, std::size_t const)
 using Value = std::string;
 using Term = std::variant<Var, Value>;
 using Fact = std::vector<Value>;
+using inequality_map = std::map<Var, Term>;
 
 class Atom
 {
@@ -96,14 +97,33 @@ operator""_p(char const* in, unsigned long)
   return [=](auto&&... ps) { return Atom(in, { ps... }); };
 }
 
+struct Inequality
+{
+  Inequality(Var head, Term term)
+    : head(std::move(head))
+    , term(std::move(term)) {};
+
+  Var head;
+  Term term;
+};
+
+template<typename T>
+concept is_ineq_assert = requires(T t) {
+  { Inequality{ t } } -> std::same_as<T>;
+};
+
 struct Rule
 {
   Atom head;
   std::vector<Atom> body;
+  inequality_map inequality_assertions;
 
-  Rule(Atom head, std::span<Atom const> body)
+  Rule(Atom head, std::span<Atom const> body, inequality_map map)
     : head(head)
-    , body(body.begin(), body.end()) {};
+    , body(body.begin(), body.end())
+  {
+    inequality_assertions = map;
+  };
 
   // fact
   Rule(Atom head)
@@ -122,16 +142,72 @@ struct Rule
   }
 };
 
-inline auto operator,(Atom const& lhs, Atom const& rhs)
+template<typename L, typename R>
+struct Goofyness;
+
+template<typename... Atoms, typename... Assertions>
+struct Goofyness<std::tuple<Atoms...>, std::tuple<Assertions...>>
 {
-  return std::make_tuple(lhs, rhs);
+  Goofyness(std::tuple<Atoms...> const&& atoms,
+            std::tuple<Assertions...> const&& asserts)
+    : atoms(atoms)
+    , assertions(asserts) {};
+
+  std::tuple<Atoms...> atoms;
+  std::tuple<Assertions...> assertions;
+};
+
+inline auto
+operator+(Atom const& lhs, Atom const& rhs)
+{
+  return Goofyness<std::tuple<Atom, Atom>, std::tuple<>>({ lhs, rhs }, {});
 }
 
-template<typename... Ts>
-inline auto operator,(std::tuple<Ts...> const& lhs, Atom const& rhs)
+inline auto
+operator+(Atom const& lhs, Inequality const& rhs)
 {
-  return std::tuple_cat(lhs, std::make_tuple(rhs));
+  return Goofyness<std::tuple<Atom>, std::tuple<Inequality>>(std::tuple{ lhs },
+                                                             std::tuple{ rhs });
 }
+
+template<typename L, typename R>
+inline auto
+operator+(Goofyness<L, R> const& lhs, Atom const& rhs)
+{
+  return Goofyness<decltype(std::tuple_cat(std::move(lhs.atoms),
+                                           std::make_tuple(rhs))),
+                   decltype(lhs.assertions)>(
+    std::tuple_cat(std::move(lhs.atoms), std::make_tuple(rhs)),
+    std::move(lhs.assertions));
+  // return Goofyness<decltype(std::tuple_cat(std::declval<L>(),
+  //                                          std::declval<Atom>())),
+  //                                          R>(std::tupleeca)
+}
+
+template<typename L, typename R>
+inline auto
+operator+(Goofyness<L, R> const& lhs, Inequality const& rhs)
+{
+  // return Goofyness<decltype(lhs.atoms),
+  //                  decltype(std::tuple_cat(
+  //                    lhs.assertions, std::tuple{ InequalityAssertion(rhs)
+  //                    }))>(
+  return Goofyness<decltype(lhs.atoms),
+                   decltype(std::tuple_cat(std::move(lhs.assertions),
+                                           std::make_tuple(rhs)))>(
+    std::move(lhs.atoms), std::tuple_cat(lhs.assertions, std::make_tuple(rhs)));
+}
+
+// inline auto operator,(Atom const& lhs, Atom const& rhs)
+// {
+//   return std::make_tuple(lhs, rhs);
+// }
+
+// template<typename... Ts>
+// inline auto operator,(std::tuple<Ts...> const& lhs, Atom const& rhs)
+// {
+//   return std::tuple_cat(lhs, std::make_tuple(rhs));
+// }
 
 class Predicate
 {
@@ -146,6 +222,14 @@ class Predicate
   auto static constexpr tuple_to_array(std::tuple<Ts...> what)
   {
     return std::apply([](auto&&... in) { return std::array{ in... }; }, what);
+  }
+
+  template<typename... Ts>
+  auto static constexpr ineq_to_map(std::tuple<Ts...> what)
+  {
+    return std::apply(
+      [](auto&&... in) { return inequality_map({ { in.head, in.term }... }); },
+      what);
   }
 
   template<typename... Ts>
@@ -176,13 +260,15 @@ class Predicate
 
     void operator=(Atom const& atom) &&
     {
-      m_pred.add(*m_terms, std::array{ atom });
+      m_pred.add(*m_terms, std::array{ atom }, {});
     }
 
-    void operator=(auto const& atoms) &&
+    template<typename L, typename R>
+    void operator=(Goofyness<L, R> const& goofy) &&
     {
 
-      m_pred.add(*m_terms, tuple_to_array(atoms));
+      m_pred.add(
+        *m_terms, tuple_to_array(goofy.atoms), ineq_to_map(goofy.assertions));
     }
 
     Predicate& m_pred;
@@ -194,14 +280,16 @@ public:
   int arity() const;
 
   void add(std::span<Value const> vals);
-  void add(std::span<Term const> terms, std::span<Atom const> atoms);
+  void add(std::span<Term const> terms,
+           std::span<Atom const> atoms,
+           inequality_map const& map);
 
   void add(std::initializer_list<Value const> vals) { add(std::span(vals)); }
 
   void add(std::initializer_list<Term const> terms,
            std::initializer_list<Atom const> atoms)
   {
-    add(std::span(terms), std::span(atoms));
+    add(std::span(terms), std::span(atoms), {});
   }
 
   bool query_fact(std::span<Value const> vals);
@@ -242,8 +330,6 @@ private:
   friend class Interpreter;
 };
 
-using inequality_map = std::map<Var, Term>;
-
 class Interpreter
 {
   using Substitution = std::map<Var, Value>;
@@ -259,15 +345,18 @@ public:
     std::string_view what);
 
   void infer();
-  std::vector<Substitution> query(std::span<Atom const>,
-                                  inequality_map const& inequality_assertions);
+  std::vector<Substitution> query(
+    std::span<Atom const>,
+    inequality_map const& inequality_assertions = {});
 
   // creates a formatted string
   // that dumps every fact in the database
   std::string dump_facts();
 
 private:
-  std::vector<Substitution> evaluate(std::span<Atom const> atoms);
+  std::vector<Substitution> evaluate(
+    std::span<Atom const> atoms,
+    inequality_map const& inequality_assertions);
   std::vector<Substitution> search(bool naive,
                                    int i,
                                    std::span<Atom const> atoms,
