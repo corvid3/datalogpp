@@ -247,6 +247,7 @@ class Predicate
     RuleAdder(Predicate& p)
       : m_pred(p)
     {
+      m_terms = {};
     }
 
     void operator=(fact_hack)
