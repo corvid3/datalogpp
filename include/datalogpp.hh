@@ -253,14 +253,14 @@ class Predicate
     {
       std::array<Value, sizeof...(Ts)> vals;
       std::ranges::transform(
-        *m_terms, vals.begin(), [](auto&& in) { return std::get<Value>(in); });
+        m_terms, vals.begin(), [](auto&& in) { return std::get<Value>(in); });
 
       m_pred.add(vals);
     }
 
     void operator=(Atom const& atom) &&
     {
-      m_pred.add(*m_terms, std::array{ atom }, {});
+      m_pred.add(m_terms, std::array{ atom }, {});
     }
 
     template<typename L, typename R>
@@ -268,7 +268,7 @@ class Predicate
     {
 
       m_pred.add(
-        *m_terms, tuple_to_array(goofy.atoms), ineq_to_map(goofy.assertions));
+        m_terms, tuple_to_array(goofy.atoms), ineq_to_map(goofy.assertions));
     }
 
     Predicate& m_pred;
