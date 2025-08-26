@@ -240,14 +240,13 @@ class Predicate
 
     RuleAdder(Predicate& p, std::tuple<Ts...> const& terms)
       : m_pred(p)
+      , m_terms(tuple_to_array_term(terms))
     {
-      m_terms = tuple_to_array_term(terms);
     }
 
     RuleAdder(Predicate& p)
       : m_pred(p)
     {
-      m_terms = {};
     }
 
     void operator=(fact_hack)
@@ -273,7 +272,7 @@ class Predicate
     }
 
     Predicate& m_pred;
-    std::optional<std::array<Term, sizeof...(Ts)>> m_terms;
+    std::array<Term, sizeof...(Ts)> m_terms;
   };
 
 public:
