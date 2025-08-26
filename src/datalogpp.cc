@@ -182,7 +182,8 @@ Interpreter::search(bool naive,
   auto const predicate = m_predicates.find(predicate_name);
 
   if (predicate == m_predicates.end())
-    throw std::runtime_error("unknown predicate");
+    throw std::runtime_error(
+      std::format("unknown predicate {}", predicate_name));
 
   auto const& base_facts = predicate->second.m_baseFacts;
   auto const& derived_facts = naive ? predicate->second.m_derivedFacts
