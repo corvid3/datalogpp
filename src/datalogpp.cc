@@ -111,9 +111,13 @@ Interpreter::infer()
           Fact f;
 
           for (auto const& term : rule.head.subterms()) {
-            if (std::holds_alternative<Var>(term))
+            if (std::holds_alternative<Var>(term)) {
+              if (!subst.contains(std::get<Var>(term)))
+                throw std::runtime_error(std::format(
+                  "datalogpp: head substitution variable {} failed to unify",
+                  std::get<Var>(term).m_name));
               f.push_back(subst.at(std::get<Var>(term)));
-            else
+            } else
               f.push_back(std::get<Value>(term));
           }
 
@@ -294,150 +298,5 @@ Interpreter::dump_facts()
 
   return std::move(ss).str();
 }
-
-// enum class TokenType
-// {
-//   LEXIBLE_EOF,
-//   Identifier,
-//   Space,
-
-//   Equal,
-//   LeftParan,
-//   RightParan,
-//   Period,
-//   Comma,
-// };
-
-// std::string_view constexpr skip_regex = "\\s+";
-// std::string_view constexpr identifier_regex = "[a-zA-Z]+";
-// std::string_view constexpr left_paran_regex = "\\(";
-// std::string_view constexpr right_paran_regex = "\\)";
-// std::string_view constexpr comma_regex = ",";
-// std::string_view constexpr equal_regex = "=";
-// std::string_view constexpr period_regex = "\\.";
-
-// using skip_morpheme = lexible::morpheme<skip_regex, TokenType::Space, 0>;
-// using identifier_morpheme =
-//   lexible::morpheme<identifier_regex, TokenType::Identifier, 0>;
-
-// using left_paran_morpheme =
-//   lexible::morpheme<left_paran_regex, TokenType::LeftParan, 0>;
-// using right_paran_morpheme =
-//   lexible::morpheme<right_paran_regex, TokenType::RightParan, 0>;
-// using comma_morpheme = lexible::morpheme<comma_regex, TokenType::Comma, 0>;
-// using equal_morpheme = lexible::morpheme<equal_regex, TokenType::Equal, 0>;
-// using period_morpheme = lexible::morpheme<period_regex, TokenType::Period,
-// 0>;
-
-// using Lexer = lexible::lexer<TokenType,
-//                              skip_morpheme,
-//                              identifier_morpheme,
-//                              left_paran_morpheme,
-//                              right_paran_morpheme,
-//                              comma_morpheme,
-//                              equal_morpheme,
-//                              period_morpheme>;
-
-// struct State
-// {
-//   Interpreter& interp;
-// };
-
-// using pctx = lexible::ParsingContext<Lexer::token, State>;
-
-// struct SubtermParser
-//   : pctx::Maybe<pctx::MorphemeParser<TokenType::Identifier>,
-//                 pctx::MorphemeParser<TokenType::Comma>>
-// {
-//   auto operator()(State&, std::string_view ident) { return ident; }
-//   auto operator()(State&, std::string_view ident, std::string_view)
-//   {
-//     return ident;
-//   }
-// };
-
-// struct AtomParser
-//   : pctx::AndThen<pctx::MorphemeParser<TokenType::Identifier>,
-//                   pctx::MorphemeParser<TokenType::LeftParan>,
-//                   pctx::Repeat<SubtermParser, false>,
-//                   pctx::MorphemeParser<TokenType::RightParan>>
-// {
-//   auto static constexpr CUT_AT = 1;
-//   auto static constexpr CUT_ERROR = "omg";
-
-//   auto operator()(State&, auto const& in)
-//   {
-//     auto const [name, _1, subterms, _2] = in;
-//     std::vector<Term> variables;
-//     std::ranges::transform(subterms,
-//                            std::inserter(variables, variables.end()),
-//                            [](auto const& in) { return Var(in); });
-
-//     return Atom(name, variables);
-//   }
-// };
-
-// struct atom_repeat_inner
-//   : pctx::Maybe<AtomParser, pctx::MorphemeParser<TokenType::Comma>>
-// {
-//   auto operator()(State&, Atom const&& out) { return out; }
-//   auto operator()(State&, Atom const&& out, std::string_view) { return out; }
-// };
-
-// using atom_repeat = pctx::Repeat<atom_repeat_inner, true>;
-
-// struct toplevel_parse_inner_inner
-//   : pctx::AndThen<pctx::MorphemeParser<TokenType::Equal>, atom_repeat>
-// {
-//   auto operator()(State&, auto const& what)
-//   {
-//     auto const [_, atom_vec] = what;
-//     return atom_vec;
-//   }
-// };
-
-// struct toplevel_parse_inner
-//   : pctx::Maybe<AtomParser, toplevel_parse_inner_inner>
-// {
-//   auto operator()(State& s, Atom const&& in)
-//   {
-//     if (s.interp.get_predicate(in.predicate()).has_value())
-//       throw std::runtime_error("attempting to redefine predicate");
-
-//     s.interp.predicate(in.predicate(), in.subterms().size());
-
-//     return lexible::empty_t{};
-//   }
-
-//   auto operator()(State& s, Atom const&& in, std::vector<Atom> rules)
-//   {
-//     auto found = s.interp.get_predicate(in.predicate());
-
-//     if (not found) {
-//       auto& pred = s.interp.predicate(in.predicate(), in.subterms().size());
-//       pred.add(in.subterms(), rules);
-//     }
-
-//     Predicate& found_ = found->get();
-//     if ((int)found_.arity() != (int)in.subterms().size())
-//       throw std::runtime_error("mismatched arity");
-
-//     found_.add(in.subterms(), rules);
-
-//     return lexible::empty_t{};
-//   }
-// };
-
-// struct toplevel_parse
-//   : pctx::AndThen<toplevel_parse_inner,
-//   pctx::MorphemeParser<TokenType::Period>>
-// {
-//   auto operator()(State&, auto const&) { return lexible::empty_t{}; }
-// };
-
-// struct toplevel_parse_cont : pctx::Repeat<toplevel_parse, false>
-// {
-//   auto operator()(State&, auto const&) { return lexible::empty_t{}; }
-// };
 
 }; // namespace datalogpp
